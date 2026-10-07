@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ExpenseHub.Api.Auth;
 using ExpenseHub.Api.Configuration;
 using ExpenseHub.Api.Data;
+using ExpenseHub.Api.Expenses;
 using ExpenseHub.Api.Initialization;
 using ExpenseHub.Api.Models;
 using ExpenseHub.Api.Security;
@@ -108,6 +110,8 @@ internal static class Program
         builder.Services.AddScoped<IAdminSeeder, AdminSeeder>();
         builder.Services.AddScoped<IUserRegistrationService, UserRegistrationService>();
         builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+        builder.Services.AddScoped<IExpenseDraftRepository, EfExpenseDraftRepository>();
+        builder.Services.AddScoped<IExpenseDraftService, ExpenseDraftService>();
         builder.Services.AddOpenApi();
 
         WebApplication app = builder.Build();
@@ -178,6 +182,50 @@ internal static class Program
                         ? Results.Problem(title: "Forbidden", detail: result.Error.Message, statusCode: StatusCodes.Status403Forbidden)
                         : Results.ValidationProblem(new Dictionary<string, string[]> { [result.Error.Code] = [result.Error.Message] });
         }).RequireAuthorization(AuthorizationPolicies.Admin);
+        app.MapPost("/api/expenses", async (ExpenseDraftRequest? request, IExpenseDraftService service, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
+            if (string.IsNullOrWhiteSpace(ownerId))
+            {
+                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            List<string> validationErrors = ValidateExpenseRequest(request);
+            if (validationErrors.Count > 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
+            }
+
+            DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request!, ownerId, cancellationToken);
+            return result.Succeeded
+                ? Results.Created($"/api/expenses/{result.Value!.Id}", result.Value)
+                : result.ErrorCode == "InvalidCategory"
+                    ? Results.ValidationProblem(new Dictionary<string, string[]> { ["CategoryId"] = [result.ErrorMessage!] })
+                    : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Employee);
+        app.MapPut("/api/expenses/{id:int}", async (int id, ExpenseDraftRequest? request, IExpenseDraftService service, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
+            if (string.IsNullOrWhiteSpace(ownerId))
+            {
+                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            List<string> validationErrors = ValidateExpenseRequest(request);
+            if (validationErrors.Count > 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
+            }
+
+            DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(id, request!, ownerId, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.ErrorCode == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
+                    : result.ErrorCode == "Conflict"
+                        ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
+                        : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Employee);
 
         if (builder.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
         {
@@ -204,6 +252,20 @@ internal static class Program
     }
 
     private static List<string> ValidateRegisterRequest(RegisterRequest? request)
+    {
+        if (request is null)
+        {
+            return ["A request body is required."];
+        }
+
+        List<ValidationResult> results = [];
+        bool isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
+        return isValid
+            ? []
+            : [.. results.Select(result => result.ErrorMessage ?? "Invalid value.")];
+    }
+
+    private static List<string> ValidateExpenseRequest(ExpenseDraftRequest? request)
     {
         if (request is null)
         {
