@@ -15,6 +15,7 @@ internal sealed class InMemoryIdentityStore
       IUserEmailStore<ApplicationUser>,
       IUserRoleStore<ApplicationUser>,
       IUserClaimStore<ApplicationUser>,
+      IQueryableUserStore<ApplicationUser>,
       IRoleStore<IdentityRole>
 {
     private readonly Dictionary<string, ApplicationUser> _users = new(StringComparer.OrdinalIgnoreCase);
@@ -23,6 +24,10 @@ internal sealed class InMemoryIdentityStore
 
     public IReadOnlyDictionary<string, ApplicationUser> Users => _users;
     public IReadOnlyDictionary<string, IdentityRole> Roles => _roles;
+    public string? FailOnAddRole { get; set; }
+    public string? FailOnRemoveRole { get; set; }
+
+    IQueryable<ApplicationUser> IQueryableUserStore<ApplicationUser>.Users => new TestAsyncEnumerable<ApplicationUser>(_users.Values);
 
     Task<IdentityResult> IUserStore<ApplicationUser>.CreateAsync(ApplicationUser user, CancellationToken cancellationToken)
     {
@@ -34,6 +39,7 @@ internal sealed class InMemoryIdentityStore
 
         _users[key] = user;
         _userRoles[user.Id] = [];
+        EnsureRolesSeeded();
         return Task.FromResult(IdentityResult.Success);
     }
 
@@ -151,6 +157,11 @@ internal sealed class InMemoryIdentityStore
 
     Task IUserRoleStore<ApplicationUser>.AddToRoleAsync(ApplicationUser user, string roleName, CancellationToken cancellationToken)
     {
+        if (roleName.Equals(FailOnAddRole, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromException(new InvalidOperationException("Simulated role addition failure."));
+        }
+
         if (!_userRoles.TryGetValue(user.Id, out HashSet<string>? roles))
         {
             roles = [];
@@ -163,6 +174,11 @@ internal sealed class InMemoryIdentityStore
 
     Task IUserRoleStore<ApplicationUser>.RemoveFromRoleAsync(ApplicationUser user, string roleName, CancellationToken cancellationToken)
     {
+        if (roleName.Equals(FailOnRemoveRole, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromException(new InvalidOperationException("Simulated role removal failure."));
+        }
+
         if (_userRoles.TryGetValue(user.Id, out HashSet<string>? roles))
         {
             roles.Remove(roleName.ToUpperInvariant());
@@ -285,6 +301,27 @@ internal sealed class InMemoryIdentityStore
         }
 
         return Task.FromResult(IdentityResult.Success);
+    }
+
+    private void EnsureRolesSeeded()
+    {
+        string[] allRoles =
+        [
+            "Admin",
+            "Employee",
+            "Approver",
+            "Finance",
+            "Auditor"
+        ];
+
+        foreach (string roleName in allRoles)
+        {
+            string key = roleName.ToUpperInvariant();
+            if (!_roles.ContainsKey(key))
+            {
+                _roles[key] = new IdentityRole(roleName);
+            }
+        }
     }
 
     public void Dispose()

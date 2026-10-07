@@ -17,7 +17,7 @@ internal static class IdentityTestFactory
             Options.Create(new IdentityOptions()),
             new PasswordHasher<ApplicationUser>(),
             new List<IUserValidator<ApplicationUser>>(),
-            new List<IPasswordValidator<ApplicationUser>>(),
+            new List<IPasswordValidator<ApplicationUser>> { new PasswordValidator<ApplicationUser>() },
             new UpperInvariantLookupNormalizer(),
             new IdentityErrorDescriber(),
             new ServiceCollection().BuildServiceProvider(),
