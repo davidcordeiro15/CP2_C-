@@ -94,7 +94,7 @@ public sealed class UserRegistrationTests
         UserRegistrationService service = new(IdentityTestFactory.CreateUserManager(store));
 
         ServiceResult<RegisterResponse> result = await service.RegisterAsync(
-            new RegisterRequest { Email = SyntheticValues.CreateEmail(), Password = "Aa1!" },
+            new RegisterRequest { Email = SyntheticValues.CreateEmail(), Password = SyntheticValues.CreateInvalidPassword() },
             CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);

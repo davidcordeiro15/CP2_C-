@@ -3,7 +3,7 @@
 Antes de finalizar qualquer implementação:
 
 - Não versionar credenciais, tokens, connection strings, fallbacks sensíveis ou valores equivalentes no código e nos testes.
-- Usar valores sintéticos gerados em runtime nos testes, sem literais que sejam detectados como segredos.
+- Usar valores sintéticos gerados em runtime nos testes, inclusive testes negativos, sem literais que sejam detectados como segredos.
 - Cumprir nomenclatura e newline final conforme `.editorconfig`.
 - Revisar os arquivos rastreados, o diff e o escopo de alterações.
 - Executar build completo sem erros ou warnings.
