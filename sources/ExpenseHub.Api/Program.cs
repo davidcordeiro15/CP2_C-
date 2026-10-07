@@ -11,6 +11,7 @@ using ExpenseHub.Api.Data;
 using ExpenseHub.Api.Initialization;
 using ExpenseHub.Api.Models;
 using ExpenseHub.Api.Security;
+using ExpenseHub.Api.Users;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -105,6 +106,8 @@ internal static class Program
         builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
         builder.Services.AddScoped<ILoginService, LoginService>();
         builder.Services.AddScoped<IAdminSeeder, AdminSeeder>();
+        builder.Services.AddScoped<IUserRegistrationService, UserRegistrationService>();
+        builder.Services.AddScoped<IAdminUserService, AdminUserService>();
         builder.Services.AddOpenApi();
 
         WebApplication app = builder.Build();
@@ -140,6 +143,41 @@ internal static class Program
                     statusCode: StatusCodes.Status401Unauthorized)
                 : Results.Ok(response);
         }).AllowAnonymous();
+        app.MapPost("/register", async (RegisterRequest? request, IUserRegistrationService registrationService, CancellationToken cancellationToken) =>
+        {
+            List<string> validationErrors = ValidateRegisterRequest(request);
+
+            if (validationErrors.Count > 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
+            }
+
+            ServiceResult<RegisterResponse> result = await registrationService.RegisterAsync(request!, cancellationToken);
+            return result.Succeeded
+                ? Results.Created($"/api/admin/users/{result.Value!.Id}", result.Value)
+                : Results.ValidationProblem(new Dictionary<string, string[]> { ["Identity"] = [result.Error!.Message] });
+        }).AllowAnonymous();
+        app.MapGet("/api/admin/users", async (IAdminUserService adminUserService, CancellationToken cancellationToken) =>
+        {
+            IReadOnlyList<UserSummary> users = await adminUserService.GetUsersAsync(cancellationToken);
+            return Results.Ok(users);
+        }).RequireAuthorization(AuthorizationPolicies.Admin);
+        app.MapPut("/api/admin/users/{id}/roles", async (string id, UpdateRolesRequest? request, IAdminUserService adminUserService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            if (request is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = ["A request body is required."] });
+            }
+
+            ServiceResult<UserSummary> result = await adminUserService.ReplaceRolesAsync(id, request, user, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.Error!.Code == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.Error.Message))
+                    : result.Error.Code == "SelfAdminRemoval"
+                        ? Results.Problem(title: "Forbidden", detail: result.Error.Message, statusCode: StatusCodes.Status403Forbidden)
+                        : Results.ValidationProblem(new Dictionary<string, string[]> { [result.Error.Code] = [result.Error.Message] });
+        }).RequireAuthorization(AuthorizationPolicies.Admin);
 
         if (builder.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
         {
@@ -152,6 +190,20 @@ internal static class Program
     }
 
     private static List<string> ValidateRequest(LoginRequest? request)
+    {
+        if (request is null)
+        {
+            return ["A request body is required."];
+        }
+
+        List<ValidationResult> results = [];
+        bool isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
+        return isValid
+            ? []
+            : [.. results.Select(result => result.ErrorMessage ?? "Invalid value.")];
+    }
+
+    private static List<string> ValidateRegisterRequest(RegisterRequest? request)
     {
         if (request is null)
         {
