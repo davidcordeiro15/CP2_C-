@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using ExpenseHub.Api.Models;
@@ -9,6 +10,8 @@ namespace ExpenseHub.Api.Expenses;
 internal interface IExpenseDraftRepository
 {
     Task<Expense?> FindOwnedAsync(int id, string ownerId, CancellationToken cancellationToken);
+    Task<Expense?> FindOwnedReadOnlyAsync(int id, string ownerId, CancellationToken cancellationToken);
+    Task<Expense?> SubmitOwnedAsync(int id, string ownerId, DateTime submittedAtUtc, CancellationToken cancellationToken);
     Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken);
     Task AddAsync(Expense expense, CancellationToken cancellationToken);
     Task SaveAsync(CancellationToken cancellationToken);
@@ -21,6 +24,24 @@ internal interface IExpenseDraftService
 {
     Task<DraftServiceResult<ExpenseDraftResponse>> CreateAsync(ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken);
     Task<DraftServiceResult<ExpenseDraftResponse>> UpdateAsync(int id, ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken);
+}
+
+internal interface IExpenseQueryRepository
+{
+    Task<Expense?> FindByIdAsync(int id, CancellationToken cancellationToken);
+    Task<List<Expense>> GetVisibleAsync(ClaimsPrincipal user, CancellationToken cancellationToken);
+    Task<Expense?> FindVisibleAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
+}
+
+internal interface IExpenseSubmitService
+{
+    Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, string ownerId, CancellationToken cancellationToken);
+}
+
+internal interface IExpenseQueryService
+{
+    Task<DraftServiceResult<ExpenseDraftResponse>> GetAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
+    Task<IReadOnlyList<ExpenseDraftResponse>> ListAsync(ClaimsPrincipal user, CancellationToken cancellationToken);
 }
 
 internal sealed class ExpenseDraftService : IExpenseDraftService

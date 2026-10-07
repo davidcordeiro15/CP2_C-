@@ -111,7 +111,11 @@ internal static class Program
         builder.Services.AddScoped<IUserRegistrationService, UserRegistrationService>();
         builder.Services.AddScoped<IAdminUserService, AdminUserService>();
         builder.Services.AddScoped<IExpenseDraftRepository, EfExpenseDraftRepository>();
+        builder.Services.AddScoped<IExpenseQueryRepository, EfExpenseDraftRepository>();
         builder.Services.AddScoped<IExpenseDraftService, ExpenseDraftService>();
+        builder.Services.AddScoped<IExpenseSubmitService, ExpenseSubmitService>();
+        builder.Services.AddScoped<IExpenseQueryService, ExpenseQueryService>();
+        builder.Services.AddScoped<IExpenseCategorySeeder, ExpenseCategorySeeder>();
         builder.Services.AddOpenApi();
 
         WebApplication app = builder.Build();
@@ -226,6 +230,49 @@ internal static class Program
                         ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
                         : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Employee);
+        app.MapPost("/api/expenses/{id:int}/submit", async (int id, IExpenseSubmitService submitService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
+            if (string.IsNullOrWhiteSpace(ownerId))
+            {
+                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            DraftServiceResult<ExpenseDraftResponse> result = await submitService.SubmitAsync(id, ownerId, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.ErrorCode == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
+                    : result.ErrorCode == "Conflict"
+                        ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
+                        : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Employee);
+        app.MapGet("/api/expenses", async (IExpenseQueryService queryService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            IReadOnlyList<ExpenseDraftResponse> expenses = await queryService.ListAsync(user, cancellationToken);
+            return Results.Ok(expenses);
+        }).RequireAuthorization(policy => policy.RequireAssertion(ctx =>
+            ctx.User.IsInRole(ExpenseHubRoles.Employee) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Approver) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Finance) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Auditor)));
+        app.MapGet("/api/expenses/{id:int}", async (int id, IExpenseQueryService queryService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            DraftServiceResult<ExpenseDraftResponse> result = await queryService.GetAsync(id, user, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!));
+        }).RequireAuthorization(policy => policy.RequireAssertion(ctx =>
+            ctx.User.IsInRole(ExpenseHubRoles.Employee) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Approver) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Finance) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Auditor)));
+
+        {
+            using IServiceScope scope = app.Services.CreateScope();
+            IExpenseCategorySeeder categorySeeder = scope.ServiceProvider.GetRequiredService<IExpenseCategorySeeder>();
+            await categorySeeder.SeedAsync(CancellationToken.None);
+        }
 
         if (builder.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
         {

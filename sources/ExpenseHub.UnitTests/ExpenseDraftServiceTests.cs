@@ -304,6 +304,22 @@ internal sealed class InMemoryExpenseDraftRepository : IExpenseDraftRepository
         return Task.FromResult(Expenses.SingleOrDefault(expense => expense.Id == id && expense.OwnerId == ownerId));
     }
 
+    public Task<Expense?> FindOwnedReadOnlyAsync(int id, string ownerId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(Expenses.SingleOrDefault(expense => expense.Id == id && expense.OwnerId == ownerId));
+    }
+
+    public Task<Expense?> SubmitOwnedAsync(int id, string ownerId, DateTime submittedAtUtc, CancellationToken cancellationToken)
+    {
+        Expense? expense = Expenses.SingleOrDefault(item => item.Id == id && item.OwnerId == ownerId && item.Status == ExpenseStatus.Draft);
+        if (expense is not null)
+        {
+            expense.Status = ExpenseStatus.Submitted;
+        }
+
+        return Task.FromResult(expense);
+    }
+
     public Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken)
     {
         return Task.FromResult(Categories.SingleOrDefault(category => category.Id == id));
