@@ -10,9 +10,6 @@ _ReSharper*/
 *.[Rr]e[Ss]harper
 *.DotSettings.user
 
-### CUSTOM - Ignore Migrations ####
-sources/MyPDV/Migrations/
-
 # Build artifacts
 [Dd]ebug/
 [Rr]elease/
