@@ -15,7 +15,7 @@ namespace ExpenseHub.UnitTests;
 [TestClass]
 public sealed class ExpenseDecisionServiceTests
 {
-    private static readonly DateTimeOffset FixedNow = new(2031, 4, 5, 10, 15, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _fixedNow = new(2031, 4, 5, 10, 15, 0, TimeSpan.Zero);
 
     /// <summary>AprovaÃ§Ã£o transiciona para Approved com histÃ³rico do servidor.</summary>
     /// <summary>Valida comportamento esperado.</summary>
@@ -29,7 +29,7 @@ public sealed class ExpenseDecisionServiceTests
         Assert.IsTrue(result.Succeeded);
         Assert.AreEqual(ExpenseStatus.Approved, result.Value!.Status);
         Assert.AreEqual("approver", history.ActorId);
-        Assert.AreEqual(FixedNow.UtcDateTime, history.TimestampUtc);
+        Assert.AreEqual(_fixedNow.UtcDateTime, history.TimestampUtc);
         Assert.AreEqual(ExpenseStatus.Submitted, history.PreviousStatus);
         Assert.AreEqual(ExpenseStatus.Approved, history.NewStatus);
     }
@@ -155,7 +155,7 @@ public sealed class ExpenseDecisionServiceTests
         Assert.HasCount(1, repository.Expenses[0].Histories);
     }
 
-    private static ExpenseDecisionService Service(InMemoryQueryRepository repository) => new(repository, repository, new FixedTimeProvider(FixedNow));
-    private static InMemoryQueryRepository Repository(ExpenseStatus status, string owner = "owner") => new([new Expense { Id = 1, OwnerId = owner, Description = "Valid expense description", Amount = 1, ExpenseDate = FixedNow.Date, CategoryId = 1, Category = new ExpenseCategory { Id = 1, Name = "Meals" }, Status = status }]);
+    private static ExpenseDecisionService Service(InMemoryQueryRepository repository) => new(repository, repository, new FixedTimeProvider(_fixedNow));
+    private static InMemoryQueryRepository Repository(ExpenseStatus status, string owner = "owner") => new([new Expense { Id = 1, OwnerId = owner, Description = "Valid expense description", Amount = 1, ExpenseDate = _fixedNow.Date, CategoryId = 1, Category = new ExpenseCategory { Id = 1, Name = "Meals" }, Status = status }]);
     private static ClaimsPrincipal Principal(string id, params string[] roles) => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id), .. roles.Select(role => new Claim(ClaimTypes.Role, role))], "test"));
 }

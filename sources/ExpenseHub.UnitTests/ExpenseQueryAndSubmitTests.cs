@@ -30,6 +30,19 @@ public sealed class ExpenseQueryAndSubmitTests
         Assert.HasCount(1, repository.Expenses[0].Histories);
     }
 
+    /// <summary>Valida conflito ao submeter reembolso já submetido.</summary>
+    [TestMethod]
+    public async Task SubmitAlreadySubmittedReturnsConflict()
+    {
+        InMemoryQueryRepository repository = CreateRepository();
+        ExpenseSubmitService service = new(repository, repository, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        DraftServiceResult<ExpenseDraftResponse> first = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Employee), CancellationToken.None);
+        Assert.IsTrue(first.Succeeded);
+        DraftServiceResult<ExpenseDraftResponse> repeated = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Employee), CancellationToken.None);
+        Assert.IsFalse(repeated.Succeeded);
+        Assert.AreEqual("Conflict", repeated.ErrorCode);
+    }
+
     /// <summary>Valida 404 para outro proprietário e inexistente.</summary>
     [TestMethod]
     public async Task SubmitOtherOwnerOrMissingReturnsNotFound()
