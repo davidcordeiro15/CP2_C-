@@ -15,6 +15,8 @@ internal interface IExpenseDraftRepository
     Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken);
     Task<Expense?> SubmitOwnedAsync(int id, string ownerId, DateTime submittedAtUtc, CancellationToken cancellationToken);
     Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestampUtc, CancellationToken cancellationToken);
+    Task<Expense?> PayAsync(int id, string actorId, DateTime timestampUtc, CancellationToken cancellationToken);
+    Task<List<ExpenseHistory>> FindHistoryAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
     Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken);
     Task AddAsync(Expense expense, CancellationToken cancellationToken);
     Task SaveAsync(CancellationToken cancellationToken);
@@ -45,6 +47,16 @@ internal interface IExpenseSubmitService
 internal interface IExpenseDecisionService
 {
     Task<DraftServiceResult<ExpenseDraftResponse>> DecideAsync(int id, ClaimsPrincipal user, ExpenseStatus targetStatus, string? justification, CancellationToken cancellationToken);
+}
+
+internal interface IExpensePaymentService
+{
+    Task<DraftServiceResult<ExpenseDraftResponse>> PayAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
+}
+
+internal interface IExpenseHistoryService
+{
+    Task<DraftServiceResult<IReadOnlyList<ExpenseHistoryResponse>>> GetAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
 }
 
 internal interface IExpenseQueryService

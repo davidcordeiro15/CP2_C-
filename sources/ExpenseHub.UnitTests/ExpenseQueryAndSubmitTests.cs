@@ -102,6 +102,7 @@ internal sealed class InMemoryQueryRepository : IExpenseDraftRepository, IExpens
 {
     public InMemoryQueryRepository(List<Expense> expenses) { Expenses = expenses; }
     public List<Expense> Expenses { get; }
+    public Exception? PaymentException { get; set; }
     public Task<Expense?> FindOwnedAsync(int id, string ownerId, CancellationToken cancellationToken)
     {
         return Task.FromResult(Expenses.SingleOrDefault(item => item.Id == id && item.OwnerId == ownerId));
@@ -154,6 +155,25 @@ internal sealed class InMemoryQueryRepository : IExpenseDraftRepository, IExpens
         });
         return Task.FromResult<Expense?>(expense);
     }
+    public Task<Expense?> PayAsync(int id, string actorId, DateTime timestamp, CancellationToken cancellationToken)
+    {
+        if (PaymentException is not null)
+        {
+            throw PaymentException;
+        }
+
+        Expense? expense = Expenses.SingleOrDefault(item => item.Id == id && item.Status == ExpenseStatus.Approved);
+        if (expense is null)
+        {
+            return Task.FromResult<Expense?>(null);
+        }
+
+        expense.Status = ExpenseStatus.Paid;
+        expense.PaymentRecord = new PaymentRecord { ExpenseId = id, PayerId = actorId, PaidAtUtc = timestamp };
+        expense.Histories.Add(new ExpenseHistory { Action = "Paid", ActorId = actorId, TimestampUtc = timestamp, PreviousStatus = ExpenseStatus.Approved, NewStatus = ExpenseStatus.Paid });
+        return Task.FromResult<Expense?>(expense);
+    }
+    public Task<List<ExpenseHistory>> FindHistoryAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken) => Task.FromResult(Expenses.SingleOrDefault(item => item.Id == id)?.Histories.OrderBy(history => history.TimestampUtc).ThenBy(history => history.Id).ToList() ?? []);
     public Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken) => Task.FromResult<ExpenseCategory?>(null);
     public Task AddAsync(Expense expense, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task SaveAsync(CancellationToken cancellationToken) => Task.CompletedTask;

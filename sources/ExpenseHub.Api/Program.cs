@@ -114,6 +114,8 @@ internal static class Program
         builder.Services.AddScoped<IExpenseDraftService, ExpenseDraftService>();
         builder.Services.AddScoped<IExpenseSubmitService, ExpenseSubmitService>();
         builder.Services.AddScoped<IExpenseDecisionService, ExpenseDecisionService>();
+        builder.Services.AddScoped<IExpensePaymentService, ExpensePaymentService>();
+        builder.Services.AddScoped<IExpenseHistoryService, ExpenseHistoryService>();
         builder.Services.AddScoped<IExpenseQueryService, ExpenseQueryService>();
         builder.Services.AddScoped<IExpenseCategorySeeder, ExpenseCategorySeeder>();
         builder.Services.AddOpenApi();
@@ -279,6 +281,45 @@ internal static class Program
                                     ? Results.ValidationProblem(new Dictionary<string, string[]> { ["Justification"] = [result.ErrorMessage!] })
                                     : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Approver);
+        app.MapPost("/api/expenses/{id:int}/pay", async (int id, IExpensePaymentService payService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            DraftServiceResult<ExpenseDraftResponse> result = await payService.PayAsync(id, user, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.ErrorCode == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
+                    : result.ErrorCode == "Conflict"
+                        ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
+                        : result.ErrorCode == "Unauthorized"
+                            ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                            : result.ErrorCode == "Forbidden"
+                                ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                                : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Finance);
+        app.MapGet("/api/expenses/{id:int}/history", async (int id, IExpenseHistoryService historyService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            DraftServiceResult<IReadOnlyList<ExpenseHistoryResponse>> result = await historyService.GetAsync(id, user, cancellationToken);
+            if (result.Succeeded && result.Value != null)
+            {
+                return Results.Ok(result.Value);
+            }
+
+            if (!result.Succeeded && result.ErrorCode == "Unauthorized")
+            {
+                return Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (!result.Succeeded && result.ErrorCode == "Forbidden")
+            {
+                return Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            return Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!));
+        }).RequireAuthorization(policy => policy.RequireAssertion(ctx =>
+            ctx.User.IsInRole(ExpenseHubRoles.Employee) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Approver) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Finance) ||
+            ctx.User.IsInRole(ExpenseHubRoles.Auditor)));
         app.MapGet("/api/expenses", async (IExpenseQueryService queryService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
             try
