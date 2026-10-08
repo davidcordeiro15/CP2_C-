@@ -12,7 +12,9 @@ internal interface IExpenseDraftRepository
 {
     Task<Expense?> FindOwnedAsync(int id, string ownerId, CancellationToken cancellationToken);
     Task<Expense?> FindOwnedReadOnlyAsync(int id, string ownerId, CancellationToken cancellationToken);
+    Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken);
     Task<Expense?> SubmitOwnedAsync(int id, string ownerId, DateTime submittedAtUtc, CancellationToken cancellationToken);
+    Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestampUtc, CancellationToken cancellationToken);
     Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken);
     Task AddAsync(Expense expense, CancellationToken cancellationToken);
     Task SaveAsync(CancellationToken cancellationToken);
@@ -30,6 +32,7 @@ internal interface IExpenseDraftService
 internal interface IExpenseQueryRepository
 {
     Task<Expense?> FindByIdAsync(int id, CancellationToken cancellationToken);
+    Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken);
     Task<List<Expense>> GetVisibleAsync(ClaimsPrincipal user, CancellationToken cancellationToken);
     Task<Expense?> FindVisibleAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
 }
@@ -37,6 +40,11 @@ internal interface IExpenseQueryRepository
 internal interface IExpenseSubmitService
 {
     Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
+}
+
+internal interface IExpenseDecisionService
+{
+    Task<DraftServiceResult<ExpenseDraftResponse>> DecideAsync(int id, ClaimsPrincipal user, ExpenseStatus targetStatus, string? justification, CancellationToken cancellationToken);
 }
 
 internal interface IExpenseQueryService

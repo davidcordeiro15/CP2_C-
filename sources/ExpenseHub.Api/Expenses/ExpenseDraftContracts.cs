@@ -23,6 +23,14 @@ internal sealed class ExpenseDraftRequest
 
 internal sealed record ExpenseDraftResponse(int Id, string OwnerId, string Description, decimal Amount, DateTime ExpenseDate, int CategoryId, string CategoryName, ExpenseStatus Status);
 
+internal sealed class ExpenseRejectRequest
+{
+    [Required]
+    [MinLength(10)]
+    [MaxLength(500)]
+    public string Justification { get; set; } = string.Empty;
+}
+
 internal sealed record DraftServiceResult<T>(T? Value, string? ErrorCode, string? ErrorMessage)
 {
     public bool Succeeded => ErrorCode is null;

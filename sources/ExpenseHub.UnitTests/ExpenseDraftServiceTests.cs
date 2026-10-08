@@ -337,6 +337,34 @@ internal sealed class InMemoryExpenseDraftRepository : IExpenseDraftRepository
         return Task.FromResult(expense);
     }
 
+    public Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(Expenses.SingleOrDefault(expense => expense.Id == id));
+    }
+
+    public Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestamp, CancellationToken cancellationToken)
+    {
+        Expense? expense = Expenses.SingleOrDefault(item => item.Id == id && item.Status == ExpenseStatus.Submitted);
+        if (expense is null)
+        {
+            return Task.FromResult<Expense?>(null);
+        }
+
+        ExpenseStatus previous = expense.Status;
+        expense.Status = targetStatus;
+        expense.Histories.Add(new ExpenseHistory
+        {
+            ExpenseId = id,
+            ActorId = actorId,
+            Action = targetStatus == ExpenseStatus.Approved ? "Approved" : "Rejected",
+            TimestampUtc = timestamp,
+            PreviousStatus = previous,
+            NewStatus = targetStatus,
+            RejectionReason = justification
+        });
+        return Task.FromResult<Expense?>(expense);
+    }
+
     public Task<ExpenseCategory?> FindCategoryAsync(int id, CancellationToken cancellationToken)
     {
         return Task.FromResult(Categories.SingleOrDefault(category => category.Id == id));
