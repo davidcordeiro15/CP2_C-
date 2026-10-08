@@ -110,6 +110,49 @@ internal sealed class EfExpenseDraftRepository : IExpenseDraftRepository, IExpen
         return expense;
     }
 
+    public async Task<Expense?> PayAsync(int id, string actorId, DateTime timestampUtc, CancellationToken cancellationToken)
+    {
+        await using IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        int updated = await _dbContext.Expenses
+            .Where(expense => expense.Id == id && expense.Status == ExpenseStatus.Approved)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(expense => expense.Status, ExpenseStatus.Paid), cancellationToken);
+        if (updated == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        Expense expense = await _dbContext.Expenses.AsNoTracking().Include(item => item.Category).SingleAsync(item => item.Id == id, cancellationToken);
+        _dbContext.PaymentRecords.Add(new PaymentRecord { ExpenseId = id, PayerId = actorId, PaidAtUtc = timestampUtc });
+        _dbContext.ExpenseHistories.Add(new ExpenseHistory { ExpenseId = id, ActorId = actorId, Action = "Paid", TimestampUtc = timestampUtc, PreviousStatus = ExpenseStatus.Approved, NewStatus = ExpenseStatus.Paid });
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsPaymentUniquenessViolation(exception))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new PaymentAlreadyRecordedException();
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return expense;
+    }
+
+    private static bool IsPaymentUniquenessViolation(DbUpdateException exception)
+    {
+        string message = exception.InnerException?.Message ?? exception.Message;
+        return message.Contains("IX_PaymentRecords_ExpenseId", StringComparison.OrdinalIgnoreCase) ||
+            (message.Contains("PaymentRecords", StringComparison.OrdinalIgnoreCase) && message.Contains("ExpenseId", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public Task<List<ExpenseHistory>> FindHistoryAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken) => _dbContext.ExpenseHistories
+        .AsNoTracking()
+        .Where(history => history.ExpenseId == id)
+        .OrderBy(history => history.TimestampUtc)
+        .ThenBy(history => history.Id)
+        .ToListAsync(cancellationToken);
+
     public Task<List<Expense>> GetVisibleAsync(ClaimsPrincipal user, CancellationToken cancellationToken) => _dbContext.Expenses
         .AsNoTracking()
         .Include(expense => expense.Category)

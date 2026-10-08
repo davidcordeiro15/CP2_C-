@@ -23,6 +23,8 @@ internal sealed class ExpenseDraftRequest
 
 internal sealed record ExpenseDraftResponse(int Id, string OwnerId, string Description, decimal Amount, DateTime ExpenseDate, int CategoryId, string CategoryName, ExpenseStatus Status);
 
+internal sealed record ExpenseHistoryResponse(int Id, int ExpenseId, string Action, string ActorId, DateTime TimestampUtc, ExpenseStatus? PreviousStatus, ExpenseStatus? NewStatus, string? RejectionReason, string? DraftChanges);
+
 internal sealed class ExpenseRejectRequest
 {
     [Required]

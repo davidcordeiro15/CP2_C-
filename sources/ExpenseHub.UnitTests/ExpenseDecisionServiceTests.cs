@@ -11,13 +11,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ExpenseHub.UnitTests;
 
-/// <summary>Testes de aprovação e reprovação de reembolsos enviados.</summary>
+/// <summary>Testes de aprovaÃ§Ã£o e reprovaÃ§Ã£o de reembolsos enviados.</summary>
 [TestClass]
 public sealed class ExpenseDecisionServiceTests
 {
     private static readonly DateTimeOffset FixedNow = new(2031, 4, 5, 10, 15, 0, TimeSpan.Zero);
 
-    /// <summary>Aprovação transiciona para Approved com histórico do servidor.</summary>
+    /// <summary>AprovaÃ§Ã£o transiciona para Approved com histÃ³rico do servidor.</summary>
+    /// <summary>Valida comportamento esperado.</summary>
     [TestMethod]
     public async Task ApproveSubmittedExpenseCreatesApprovedHistory()
     {
@@ -33,6 +34,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual(ExpenseStatus.Approved, history.NewStatus);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task RejectSubmittedExpensePersistsTrimmedJustification()
     {
@@ -44,6 +47,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual("Justification is valid", repository.Expenses[0].Histories.Single().RejectionReason);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task MissingIdentityReturnsUnauthorized()
     {
@@ -52,6 +57,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual("Unauthorized", result.ErrorCode);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task NonApproverReturnsForbidden()
     {
@@ -59,6 +66,8 @@ public sealed class ExpenseDecisionServiceTests
         DraftServiceResult<ExpenseDraftResponse> result = await service.DecideAsync(1, Principal("employee", ExpenseHubRoles.Employee), ExpenseStatus.Approved, null, CancellationToken.None);
         Assert.AreEqual("Forbidden", result.ErrorCode);
     }
+
+    /// <summary>Valida comportamento esperado.</summary>
 
     [TestMethod]
     public async Task OwnerApproverCannotApproveOrRejectOwnExpense()
@@ -71,6 +80,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual("Forbidden", reject.ErrorCode);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task ApproverEmployeeCanDecideAnotherOwnersExpense()
     {
@@ -78,6 +89,8 @@ public sealed class ExpenseDecisionServiceTests
         DraftServiceResult<ExpenseDraftResponse> result = await service.DecideAsync(1, Principal("approver", ExpenseHubRoles.Approver, ExpenseHubRoles.Employee), ExpenseStatus.Approved, null, CancellationToken.None);
         Assert.IsTrue(result.Succeeded);
     }
+
+    /// <summary>Valida comportamento esperado.</summary>
 
     [TestMethod]
     [DataRow((int)ExpenseStatus.Draft)]
@@ -91,6 +104,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual("Conflict", result.ErrorCode);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task MissingExpenseReturnsNotFound()
     {
@@ -98,6 +113,8 @@ public sealed class ExpenseDecisionServiceTests
         DraftServiceResult<ExpenseDraftResponse> result = await service.DecideAsync(99, Principal("approver", ExpenseHubRoles.Approver), ExpenseStatus.Approved, null, CancellationToken.None);
         Assert.AreEqual("NotFound", result.ErrorCode);
     }
+
+    /// <summary>Valida comportamento esperado.</summary>
 
     [TestMethod]
     [DataRow(null)]
@@ -111,6 +128,8 @@ public sealed class ExpenseDecisionServiceTests
         Assert.AreEqual("InvalidJustification", result.ErrorCode);
     }
 
+    /// <summary>Valida comportamento esperado.</summary>
+
     [TestMethod]
     public async Task JustificationAtBoundsIsAccepted()
     {
@@ -122,6 +141,8 @@ public sealed class ExpenseDecisionServiceTests
         DraftServiceResult<ExpenseDraftResponse> maximum = await secondService.DecideAsync(1, Principal("approver", ExpenseHubRoles.Approver), ExpenseStatus.Rejected, new string('y', 500), CancellationToken.None);
         Assert.IsTrue(maximum.Succeeded);
     }
+
+    /// <summary>Valida comportamento esperado.</summary>
 
     [TestMethod]
     public async Task RepeatedDecisionReturnsConflictWithoutDuplicateHistory()
