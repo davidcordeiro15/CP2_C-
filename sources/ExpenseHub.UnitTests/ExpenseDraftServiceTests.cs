@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using ExpenseHub.Api.Expenses;
 using ExpenseHub.Api.Models;
+using ExpenseHub.Api.Security;
 using ExpenseHub.UnitTests.Fakes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -29,7 +31,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftService service = CreateService(repository);
         ExpenseDraftRequest request = ValidRequest();
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsTrue(result.Succeeded);
         Assert.AreEqual("owner-1", result.Value!.OwnerId);
@@ -94,7 +96,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftRequest request = ValidRequest();
         request.ExpenseDate = FixedNow.Date.AddDays(1);
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual("InvalidDate", result.ErrorCode);
@@ -112,7 +114,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftRequest request = ValidRequest();
         request.ExpenseDate = FixedNow.Date;
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsTrue(result.Succeeded);
     }
@@ -128,7 +130,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftRequest request = ValidRequest();
         request.CategoryId = 999;
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual("InvalidCategory", result.ErrorCode);
@@ -148,7 +150,7 @@ public sealed class ExpenseDraftServiceTests
         request.Description = "Updated description";
         request.Amount = 20;
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsTrue(result.Succeeded);
         Assert.AreEqual("owner-1", expense.OwnerId);
@@ -166,7 +168,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftService service = CreateService(repository);
         Expense expense = repository.AddExpense("owner-1", ExpenseStatus.Draft);
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), "owner-2", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), Principal("owner-2", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual("NotFound", result.ErrorCode);
@@ -182,7 +184,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftService service = CreateService(repository);
         Expense expense = repository.AddExpense("owner-1", ExpenseStatus.Submitted);
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual("Conflict", result.ErrorCode);
@@ -196,12 +198,12 @@ public sealed class ExpenseDraftServiceTests
     {
         InMemoryExpenseDraftRepository repository = CreateRepository();
         ExpenseDraftService service = CreateService(repository);
-        DraftServiceResult<ExpenseDraftResponse> created = await service.CreateAsync(ValidRequest(), "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> created = await service.CreateAsync(ValidRequest(), Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
         Expense expense = repository.Expenses.Single();
         ExpenseDraftRequest request = ValidRequest();
         request.Description = "Updated description";
 
-        DraftServiceResult<ExpenseDraftResponse> updated = await service.UpdateAsync(created.Value!.Id, request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> updated = await service.UpdateAsync(created.Value!.Id, request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsTrue(updated.Succeeded);
         Assert.HasCount(2, expense.Histories);
@@ -220,7 +222,7 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftService service = CreateService(repository);
         Expense expense = repository.AddExpense("owner-1", ExpenseStatus.Draft);
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, ValidRequest(), Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsTrue(result.Succeeded);
         Assert.IsEmpty(expense.Histories);
@@ -237,12 +239,27 @@ public sealed class ExpenseDraftServiceTests
         ExpenseDraftRequest request = ValidRequest();
         request.CategoryId = 999;
 
-        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, "owner-1", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
 
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual(0, repository.SaveCount);
         Assert.IsEmpty(repository.Expenses);
     }
+
+    /// <summary>Admin isolado não cria nem edita.</summary>
+    [TestMethod]
+    public async Task AdminWithoutEmployeeCannotCreateOrEdit()
+    {
+        InMemoryExpenseDraftRepository repository = CreateRepository();
+        ExpenseDraftService service = CreateService(repository);
+        Expense expense = repository.AddExpense("owner-1", ExpenseStatus.Draft);
+        DraftServiceResult<ExpenseDraftResponse> create = await service.CreateAsync(ValidRequest(), Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> update = await service.UpdateAsync(expense.Id, ValidRequest(), Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None);
+        Assert.AreEqual("Forbidden", create.ErrorCode);
+        Assert.AreEqual("Forbidden", update.ErrorCode);
+    }
+
+    private static ClaimsPrincipal Principal(string id, params string[] roles) => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id), .. roles.Select(role => new Claim(ClaimTypes.Role, role))], "test"));
 
     private static ExpenseDraftService CreateService(InMemoryExpenseDraftRepository repository)
     {

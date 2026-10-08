@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using ExpenseHub.Api.Models;
+using ExpenseHub.Api.Security;
 
 namespace ExpenseHub.Api.Expenses;
 
@@ -22,8 +23,8 @@ internal interface IExpenseDraftRepository
 
 internal interface IExpenseDraftService
 {
-    Task<DraftServiceResult<ExpenseDraftResponse>> CreateAsync(ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken);
-    Task<DraftServiceResult<ExpenseDraftResponse>> UpdateAsync(int id, ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken);
+    Task<DraftServiceResult<ExpenseDraftResponse>> CreateAsync(ExpenseDraftRequest request, ClaimsPrincipal user, CancellationToken cancellationToken);
+    Task<DraftServiceResult<ExpenseDraftResponse>> UpdateAsync(int id, ExpenseDraftRequest request, ClaimsPrincipal user, CancellationToken cancellationToken);
 }
 
 internal interface IExpenseQueryRepository
@@ -35,7 +36,7 @@ internal interface IExpenseQueryRepository
 
 internal interface IExpenseSubmitService
 {
-    Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, string ownerId, CancellationToken cancellationToken);
+    Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
 }
 
 internal interface IExpenseQueryService
@@ -55,8 +56,15 @@ internal sealed class ExpenseDraftService : IExpenseDraftService
         _timeProvider = timeProvider;
     }
 
-    public async Task<DraftServiceResult<ExpenseDraftResponse>> CreateAsync(ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken)
+    public async Task<DraftServiceResult<ExpenseDraftResponse>> CreateAsync(ExpenseDraftRequest request, ClaimsPrincipal user, CancellationToken cancellationToken)
     {
+        DraftServiceResult<string> authorization = AuthorizeEmployee(user, "Only employees can create drafts.");
+        if (!authorization.Succeeded)
+        {
+            return DraftServiceResult<ExpenseDraftResponse>.Failure(authorization.ErrorCode!, authorization.ErrorMessage!);
+        }
+
+        string ownerId = authorization.Value!;
         DraftServiceResult<ExpenseCategory> categoryResult = await FindCategoryAsync(request.CategoryId, cancellationToken);
         if (!categoryResult.Succeeded)
         {
@@ -97,8 +105,15 @@ internal sealed class ExpenseDraftService : IExpenseDraftService
         return DraftServiceResult<ExpenseDraftResponse>.Success(ToResponse(expense, categoryResult.Value!));
     }
 
-    public async Task<DraftServiceResult<ExpenseDraftResponse>> UpdateAsync(int id, ExpenseDraftRequest request, string ownerId, CancellationToken cancellationToken)
+    public async Task<DraftServiceResult<ExpenseDraftResponse>> UpdateAsync(int id, ExpenseDraftRequest request, ClaimsPrincipal user, CancellationToken cancellationToken)
     {
+        DraftServiceResult<string> authorization = AuthorizeEmployee(user, "Only employees can edit drafts.");
+        if (!authorization.Succeeded)
+        {
+            return DraftServiceResult<ExpenseDraftResponse>.Failure(authorization.ErrorCode!, authorization.ErrorMessage!);
+        }
+
+        string ownerId = authorization.Value!;
         Expense? expense = await _repository.FindOwnedAsync(id, ownerId, cancellationToken);
         if (expense is null)
         {
@@ -148,6 +163,19 @@ internal sealed class ExpenseDraftService : IExpenseDraftService
         }
 
         return DraftServiceResult<ExpenseDraftResponse>.Success(ToResponse(expense, categoryResult.Value!));
+    }
+
+    private static DraftServiceResult<string> AuthorizeEmployee(ClaimsPrincipal user, string message)
+    {
+        if (!user.IsInRole(ExpenseHubRoles.Employee))
+        {
+            return DraftServiceResult<string>.Failure("Forbidden", message);
+        }
+
+        string? ownerId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return string.IsNullOrWhiteSpace(ownerId)
+            ? DraftServiceResult<string>.Failure("Unauthorized", "The authenticated user identifier is missing.")
+            : DraftServiceResult<string>.Success(ownerId);
     }
 
     private async Task<DraftServiceResult<ExpenseCategory>> FindCategoryAsync(int id, CancellationToken cancellationToken)

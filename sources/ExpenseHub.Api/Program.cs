@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -188,69 +187,71 @@ internal static class Program
         }).RequireAuthorization(AuthorizationPolicies.Admin);
         app.MapPost("/api/expenses", async (ExpenseDraftRequest? request, IExpenseDraftService service, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
-            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
-            if (string.IsNullOrWhiteSpace(ownerId))
-            {
-                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
-            }
-
             List<string> validationErrors = ValidateExpenseRequest(request);
             if (validationErrors.Count > 0)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
             }
 
-            DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request!, ownerId, cancellationToken);
+            DraftServiceResult<ExpenseDraftResponse> result = await service.CreateAsync(request!, user, cancellationToken);
             return result.Succeeded
                 ? Results.Created($"/api/expenses/{result.Value!.Id}", result.Value)
-                : result.ErrorCode == "InvalidCategory"
-                    ? Results.ValidationProblem(new Dictionary<string, string[]> { ["CategoryId"] = [result.ErrorMessage!] })
-                    : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+                : result.ErrorCode == "Unauthorized"
+                    ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                    : result.ErrorCode == "Forbidden"
+                        ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                        : result.ErrorCode == "InvalidCategory"
+                            ? Results.ValidationProblem(new Dictionary<string, string[]> { ["CategoryId"] = [result.ErrorMessage!] })
+                            : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Employee);
         app.MapPut("/api/expenses/{id:int}", async (int id, ExpenseDraftRequest? request, IExpenseDraftService service, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
-            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
-            if (string.IsNullOrWhiteSpace(ownerId))
-            {
-                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
-            }
-
             List<string> validationErrors = ValidateExpenseRequest(request);
             if (validationErrors.Count > 0)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
             }
 
-            DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(id, request!, ownerId, cancellationToken);
+            DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(id, request!, user, cancellationToken);
             return result.Succeeded
                 ? Results.Ok(result.Value)
                 : result.ErrorCode == "NotFound"
                     ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
                     : result.ErrorCode == "Conflict"
                         ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
-                        : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+                        : result.ErrorCode == "Unauthorized"
+                            ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                            : result.ErrorCode == "Forbidden"
+                                ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                                : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Employee);
         app.MapPost("/api/expenses/{id:int}/submit", async (int id, IExpenseSubmitService submitService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
-            string? ownerId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirstValue("sub");
-            if (string.IsNullOrWhiteSpace(ownerId))
-            {
-                return Results.Problem(title: "Unauthorized", detail: "The authenticated user identifier is missing.", statusCode: StatusCodes.Status401Unauthorized);
-            }
-
-            DraftServiceResult<ExpenseDraftResponse> result = await submitService.SubmitAsync(id, ownerId, cancellationToken);
+            DraftServiceResult<ExpenseDraftResponse> result = await submitService.SubmitAsync(id, user, cancellationToken);
             return result.Succeeded
                 ? Results.Ok(result.Value)
                 : result.ErrorCode == "NotFound"
                     ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
                     : result.ErrorCode == "Conflict"
                         ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
-                        : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+                        : result.ErrorCode == "Unauthorized"
+                            ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                            : result.ErrorCode == "Forbidden"
+                                ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                                : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Employee);
         app.MapGet("/api/expenses", async (IExpenseQueryService queryService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
-            IReadOnlyList<ExpenseDraftResponse> expenses = await queryService.ListAsync(user, cancellationToken);
-            return Results.Ok(expenses);
+            try
+            {
+                IReadOnlyList<ExpenseDraftResponse> expenses = await queryService.ListAsync(user, cancellationToken);
+                return Results.Ok(expenses);
+            }
+            catch (ExpenseAuthorizationException exception)
+            {
+                int status = exception.Code == "Unauthorized" ? StatusCodes.Status401Unauthorized : StatusCodes.Status403Forbidden;
+                return Results.Problem(title: exception.Code, detail: exception.Message, statusCode: status);
+            }
         }).RequireAuthorization(policy => policy.RequireAssertion(ctx =>
             ctx.User.IsInRole(ExpenseHubRoles.Employee) ||
             ctx.User.IsInRole(ExpenseHubRoles.Approver) ||
@@ -261,7 +262,11 @@ internal static class Program
             DraftServiceResult<ExpenseDraftResponse> result = await queryService.GetAsync(id, user, cancellationToken);
             return result.Succeeded
                 ? Results.Ok(result.Value)
-                : Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!));
+                : result.ErrorCode == "Unauthorized"
+                    ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                    : result.ErrorCode == "Forbidden"
+                        ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                        : Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!));
         }).RequireAuthorization(policy => policy.RequireAssertion(ctx =>
             ctx.User.IsInRole(ExpenseHubRoles.Employee) ||
             ctx.User.IsInRole(ExpenseHubRoles.Approver) ||

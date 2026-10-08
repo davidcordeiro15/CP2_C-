@@ -22,8 +22,8 @@ public sealed class ExpenseQueryAndSubmitTests
     {
         InMemoryQueryRepository repository = CreateRepository();
         ExpenseSubmitService service = new(repository, repository, new FixedTimeProvider(DateTimeOffset.UtcNow));
-        DraftServiceResult<ExpenseDraftResponse> first = await service.SubmitAsync(1, "owner", CancellationToken.None);
-        DraftServiceResult<ExpenseDraftResponse> repeated = await service.SubmitAsync(1, "owner", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> first = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Employee), CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> repeated = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Employee), CancellationToken.None);
         Assert.IsTrue(first.Succeeded);
         Assert.IsFalse(repeated.Succeeded);
         Assert.AreEqual("Conflict", repeated.ErrorCode);
@@ -36,8 +36,8 @@ public sealed class ExpenseQueryAndSubmitTests
     {
         InMemoryQueryRepository repository = CreateRepository();
         ExpenseSubmitService service = new(repository, repository, TimeProvider.System);
-        DraftServiceResult<ExpenseDraftResponse> other = await service.SubmitAsync(1, "other", CancellationToken.None);
-        DraftServiceResult<ExpenseDraftResponse> missing = await service.SubmitAsync(999, "owner", CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> other = await service.SubmitAsync(1, Principal("other", ExpenseHubRoles.Employee), CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> missing = await service.SubmitAsync(999, Principal("owner", ExpenseHubRoles.Employee), CancellationToken.None);
         Assert.AreEqual("NotFound", other.ErrorCode);
         Assert.AreEqual("NotFound", missing.ErrorCode);
     }
@@ -63,9 +63,34 @@ public sealed class ExpenseQueryAndSubmitTests
     {
         InMemoryQueryRepository repository = CreateRepository();
         ExpenseQueryService service = new(repository);
-        Assert.IsEmpty(await service.ListAsync(Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<ExpenseAuthorizationException>(() => service.ListAsync(Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None));
         DraftServiceResult<ExpenseDraftResponse> result = await service.GetAsync(1, Principal("other", ExpenseHubRoles.Employee), CancellationToken.None);
         Assert.AreEqual("NotFound", result.ErrorCode);
+    }
+
+    /// <summary>Rejeita leitura sem identidade funcional.</summary>
+    [TestMethod]
+    public async Task QueryServicesRejectMissingIdentityAndFunctionalRole()
+    {
+        InMemoryQueryRepository repository = CreateRepository();
+        ExpenseQueryService service = new(repository);
+        DraftServiceResult<ExpenseDraftResponse> missingIdentity = await service.GetAsync(1, new ClaimsPrincipal(new ClaimsIdentity()), CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> noRole = await service.GetAsync(1, Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None);
+        await Assert.ThrowsExactlyAsync<ExpenseAuthorizationException>(() => service.ListAsync(Principal("admin", ExpenseHubRoles.Admin), CancellationToken.None));
+        Assert.AreEqual("Unauthorized", missingIdentity.ErrorCode);
+        Assert.AreEqual("Forbidden", noRole.ErrorCode);
+    }
+
+    /// <summary>Auditor isolado não envia despesa e Employee acumulado envia a própria.</summary>
+    [TestMethod]
+    public async Task AuditorEmployeeRetainsOwnSubmitPermissionButAuditorOnlyDoesNot()
+    {
+        InMemoryQueryRepository repository = CreateRepository();
+        ExpenseSubmitService service = new(repository, repository, TimeProvider.System);
+        DraftServiceResult<ExpenseDraftResponse> auditor = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Auditor), CancellationToken.None);
+        DraftServiceResult<ExpenseDraftResponse> employeeAuditor = await service.SubmitAsync(1, Principal("owner", ExpenseHubRoles.Auditor, ExpenseHubRoles.Employee), CancellationToken.None);
+        Assert.AreEqual("Forbidden", auditor.ErrorCode);
+        Assert.IsTrue(employeeAuditor.Succeeded);
     }
 
     private static ClaimsPrincipal Principal(string id, params string[] roles) => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id), .. roles.Select(role => new Claim(ClaimTypes.Role, role))], "test"));
