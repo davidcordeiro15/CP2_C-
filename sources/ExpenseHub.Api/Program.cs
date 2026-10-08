@@ -113,6 +113,7 @@ internal static class Program
         builder.Services.AddScoped<IExpenseQueryRepository, EfExpenseDraftRepository>();
         builder.Services.AddScoped<IExpenseDraftService, ExpenseDraftService>();
         builder.Services.AddScoped<IExpenseSubmitService, ExpenseSubmitService>();
+        builder.Services.AddScoped<IExpenseDecisionService, ExpenseDecisionService>();
         builder.Services.AddScoped<IExpenseQueryService, ExpenseQueryService>();
         builder.Services.AddScoped<IExpenseCategorySeeder, ExpenseCategorySeeder>();
         builder.Services.AddOpenApi();
@@ -240,6 +241,44 @@ internal static class Program
                                 ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
                                 : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
         }).RequireAuthorization(AuthorizationPolicies.Employee);
+        app.MapPost("/api/expenses/{id:int}/approve", async (int id, IExpenseDecisionService decisionService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            DraftServiceResult<ExpenseDraftResponse> result = await decisionService.DecideAsync(id, user, ExpenseStatus.Approved, null, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.ErrorCode == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
+                    : result.ErrorCode == "Conflict"
+                        ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
+                        : result.ErrorCode == "Unauthorized"
+                            ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                            : result.ErrorCode == "Forbidden"
+                                ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                                : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Approver);
+        app.MapPost("/api/expenses/{id:int}/reject", async (int id, ExpenseRejectRequest? request, IExpenseDecisionService decisionService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        {
+            List<string> validationErrors = ValidateRejectRequest(request);
+            if (validationErrors.Count > 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["Request"] = [.. validationErrors] });
+            }
+
+            DraftServiceResult<ExpenseDraftResponse> result = await decisionService.DecideAsync(id, user, ExpenseStatus.Rejected, request!.Justification, cancellationToken);
+            return result.Succeeded
+                ? Results.Ok(result.Value)
+                : result.ErrorCode == "NotFound"
+                    ? Results.NotFound(CreateProblem(StatusCodes.Status404NotFound, "Not Found", result.ErrorMessage!))
+                    : result.ErrorCode == "Conflict"
+                        ? Results.Problem(title: "Conflict", detail: result.ErrorMessage!, statusCode: StatusCodes.Status409Conflict)
+                        : result.ErrorCode == "Unauthorized"
+                            ? Results.Problem(title: "Unauthorized", detail: result.ErrorMessage!, statusCode: StatusCodes.Status401Unauthorized)
+                            : result.ErrorCode == "Forbidden"
+                                ? Results.Problem(title: "Forbidden", detail: result.ErrorMessage!, statusCode: StatusCodes.Status403Forbidden)
+                                : result.ErrorCode == "InvalidJustification"
+                                    ? Results.ValidationProblem(new Dictionary<string, string[]> { ["Justification"] = [result.ErrorMessage!] })
+                                    : Results.ValidationProblem(new Dictionary<string, string[]> { [result.ErrorCode!] = [result.ErrorMessage!] });
+        }).RequireAuthorization(AuthorizationPolicies.Approver);
         app.MapGet("/api/expenses", async (IExpenseQueryService queryService, System.Security.Claims.ClaimsPrincipal user, CancellationToken cancellationToken) =>
         {
             try
@@ -324,6 +363,21 @@ internal static class Program
             return ["A request body is required."];
         }
 
+        List<ValidationResult> results = [];
+        bool isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
+        return isValid
+            ? []
+            : [.. results.Select(result => result.ErrorMessage ?? "Invalid value.")];
+    }
+
+    private static List<string> ValidateRejectRequest(ExpenseRejectRequest? request)
+    {
+        if (request is null)
+        {
+            return ["A request body is required."];
+        }
+
+        request.Justification = request.Justification.Trim();
         List<ValidationResult> results = [];
         bool isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
         return isValid

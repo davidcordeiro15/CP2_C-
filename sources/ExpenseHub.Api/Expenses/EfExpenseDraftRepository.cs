@@ -69,6 +69,47 @@ internal sealed class EfExpenseDraftRepository : IExpenseDraftRepository, IExpen
         .Include(expense => expense.Category)
         .SingleOrDefaultAsync(expense => expense.Id == id, cancellationToken);
 
+    public Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken) => _dbContext.Expenses
+        .AsNoTracking()
+        .Include(expense => expense.Category)
+        .SingleOrDefaultAsync(expense => expense.Id == id, cancellationToken);
+
+    public async Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestampUtc, CancellationToken cancellationToken)
+    {
+        await using IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        int updated = await _dbContext.Expenses
+            .Where(expense => expense.Id == id && expense.Status == ExpenseStatus.Submitted)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(expense => expense.Status, targetStatus), cancellationToken);
+
+        if (updated == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        ExpenseStatus previousStatus = ExpenseStatus.Submitted;
+        Expense? expense = await _dbContext.Expenses
+            .AsNoTracking()
+            .Include(item => item.Category)
+            .SingleAsync(item => item.Id == id, cancellationToken);
+
+        _dbContext.ExpenseHistories.Add(new ExpenseHistory
+        {
+            ExpenseId = id,
+            ActorId = actorId,
+            Action = targetStatus == ExpenseStatus.Approved ? "Approved" : "Rejected",
+            TimestampUtc = timestampUtc,
+            PreviousStatus = previousStatus,
+            NewStatus = targetStatus,
+            RejectionReason = targetStatus == ExpenseStatus.Rejected ? justification : null
+        });
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return expense;
+    }
+
     public Task<List<Expense>> GetVisibleAsync(ClaimsPrincipal user, CancellationToken cancellationToken) => _dbContext.Expenses
         .AsNoTracking()
         .Include(expense => expense.Category)
