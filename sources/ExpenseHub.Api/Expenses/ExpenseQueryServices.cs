@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using ExpenseHub.Api.Models;
+using ExpenseHub.Api.Security;
 
 namespace ExpenseHub.Api.Expenses;
 
@@ -19,6 +20,12 @@ internal sealed class ExpenseQueryService : IExpenseQueryService
 
     public async Task<DraftServiceResult<ExpenseDraftResponse>> GetAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken)
     {
+        DraftServiceResult<object> auth = ValidateReadAccess(user);
+        if (!auth.Succeeded)
+        {
+            return DraftServiceResult<ExpenseDraftResponse>.Failure(auth.ErrorCode!, auth.ErrorMessage!);
+        }
+
         Expense? expense = await _repository.FindVisibleAsync(id, user, cancellationToken);
         return expense is null
             ? DraftServiceResult<ExpenseDraftResponse>.Failure("NotFound", "Expense was not found.")
@@ -27,14 +34,44 @@ internal sealed class ExpenseQueryService : IExpenseQueryService
 
     public async Task<IReadOnlyList<ExpenseDraftResponse>> ListAsync(ClaimsPrincipal user, CancellationToken cancellationToken)
     {
+        DraftServiceResult<object> auth = ValidateReadAccess(user);
+        if (!auth.Succeeded)
+        {
+            throw new ExpenseAuthorizationException(auth.ErrorCode!, auth.ErrorMessage!);
+        }
+
         List<Expense> expenses = await _repository.GetVisibleAsync(user, cancellationToken);
         return expenses.Select(ToResponse).ToList();
+    }
+
+    private static DraftServiceResult<object> ValidateReadAccess(ClaimsPrincipal user)
+    {
+        string? userId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return DraftServiceResult<object>.Failure("Unauthorized", "The authenticated user identifier is missing.");
+        }
+
+        return ExpenseVisibility.HasReadScope(user)
+            ? DraftServiceResult<object>.Success(new object())
+            : DraftServiceResult<object>.Failure("Forbidden", "The authenticated user does not have a functional expense role.");
     }
 
     private static ExpenseDraftResponse ToResponse(Expense expense)
     {
         return new(expense.Id, expense.OwnerId, expense.Description, expense.Amount, expense.ExpenseDate, expense.CategoryId, expense.Category?.Name ?? string.Empty, expense.Status);
     }
+}
+
+internal sealed class ExpenseAuthorizationException : Exception
+{
+    public ExpenseAuthorizationException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    public string Code { get; }
 }
 
 internal sealed class ExpenseSubmitService : IExpenseSubmitService
@@ -50,8 +87,19 @@ internal sealed class ExpenseSubmitService : IExpenseSubmitService
         _timeProvider = timeProvider;
     }
 
-    public async Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, string ownerId, CancellationToken cancellationToken)
+    public async Task<DraftServiceResult<ExpenseDraftResponse>> SubmitAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken)
     {
+        if (!user.IsInRole(ExpenseHubRoles.Employee))
+        {
+            return DraftServiceResult<ExpenseDraftResponse>.Failure("Forbidden", "Only employees can submit expenses.");
+        }
+
+        string? ownerId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        if (string.IsNullOrWhiteSpace(ownerId))
+        {
+            return DraftServiceResult<ExpenseDraftResponse>.Failure("Unauthorized", "The authenticated user identifier is missing.");
+        }
+
         Expense? existing = await _draftRepository.FindOwnedReadOnlyAsync(id, ownerId, cancellationToken);
         if (existing is null)
         {
