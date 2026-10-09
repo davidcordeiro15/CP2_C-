@@ -362,6 +362,75 @@ public sealed class AdminUserServiceTests
     }
 
     /// <summary>
+    /// Verifica que proteção contra auto-remoção funciona com variação de caixa.
+    /// </summary>
+    [TestMethod]
+    public async Task AdminCannotRemoveOwnAdminRoleWithDifferentCasing()
+    {
+        InMemoryIdentityStore store = new();
+        UserManager<ApplicationUser> userManager = IdentityTestFactory.CreateUserManager(store);
+        AdminUserService service = new(userManager);
+        ApplicationUser admin = await CreateUserAsync(store, SyntheticValues.CreateEmail());
+        await userManager.AddToRoleAsync(admin, ExpenseHubRoles.Admin);
+
+        ServiceResult<UserSummary> result = await service.ReplaceRolesAsync(
+            admin.Id,
+            new UpdateRolesRequest { Roles = ["admin"] },
+            CreatePrincipal(admin.Id),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.Succeeded);
+        IList<string> roles = await userManager.GetRolesAsync(admin);
+        Assert.IsTrue(roles.Contains(ExpenseHubRoles.Admin, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Verifica que roles com caixa diferente são normalizadas para forma canônica.
+    /// </summary>
+    [TestMethod]
+    public async Task ReplaceRolesNormalizesCaseToCanonicalForm()
+    {
+        InMemoryIdentityStore store = new();
+        UserManager<ApplicationUser> userManager = IdentityTestFactory.CreateUserManager(store);
+        AdminUserService service = new(userManager);
+        ApplicationUser target = await CreateUserAsync(store, SyntheticValues.CreateEmail());
+
+        ServiceResult<UserSummary> result = await service.ReplaceRolesAsync(
+            target.Id,
+            new UpdateRolesRequest { Roles = ["employee", "APPROVER"] },
+            CreatePrincipal("other-admin-id"),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.Succeeded);
+        CollectionAssert.AreEquivalent(
+            new[] { ExpenseHubRoles.Employee, ExpenseHubRoles.Approver },
+            result.Value!.Roles.ToArray());
+    }
+
+    /// <summary>
+    /// Verifica que token sem identificador não permite bypass silencioso da proteção de auto-remoção quando identificado por sub.
+    /// </summary>
+    [TestMethod]
+    public async Task AdminCannotRemoveOwnAdminRoleViaSubClaim()
+    {
+        InMemoryIdentityStore store = new();
+        UserManager<ApplicationUser> userManager = IdentityTestFactory.CreateUserManager(store);
+        AdminUserService service = new(userManager);
+        ApplicationUser admin = await CreateUserAsync(store, SyntheticValues.CreateEmail());
+        await userManager.AddToRoleAsync(admin, ExpenseHubRoles.Admin);
+
+        ClaimsPrincipal principal = new(new ClaimsIdentity([new Claim("sub", admin.Id)], "test-authentication"));
+        ServiceResult<UserSummary> result = await service.ReplaceRolesAsync(
+            admin.Id,
+            new UpdateRolesRequest { Roles = [ExpenseHubRoles.Employee] },
+            principal,
+            CancellationToken.None);
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("SelfAdminRemoval", result.Error!.Code);
+    }
+
+    /// <summary>
     /// Verifica que listagem de usuários retorna DTO sem campos sensíveis.
     /// </summary>
     [TestMethod]

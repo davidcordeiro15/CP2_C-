@@ -14,6 +14,7 @@ internal interface IExpenseDraftRepository
     Task<Expense?> FindOwnedReadOnlyAsync(int id, string ownerId, CancellationToken cancellationToken);
     Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken);
     Task<Expense?> SubmitOwnedAsync(int id, string ownerId, DateTime submittedAtUtc, CancellationToken cancellationToken);
+    Task<Expense?> UpdateOwnedDraftAsync(int id, string ownerId, ExpenseDraftRequest request, List<DraftChange> changes, DateTime timestampUtc, CancellationToken cancellationToken);
     Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestampUtc, CancellationToken cancellationToken);
     Task<Expense?> PayAsync(int id, string actorId, DateTime timestampUtc, CancellationToken cancellationToken);
     Task<List<ExpenseHistory>> FindHistoryAsync(int id, ClaimsPrincipal user, CancellationToken cancellationToken);
@@ -163,26 +164,15 @@ internal sealed class ExpenseDraftService : IExpenseDraftService
             return DraftServiceResult<ExpenseDraftResponse>.Success(ToResponse(expense, categoryResult.Value!));
         }
 
-        expense.Description = request.Description;
-        expense.Amount = request.Amount;
-        expense.ExpenseDate = request.ExpenseDate.Value.Date;
-        expense.CategoryId = request.CategoryId;
-        expense.Category = categoryResult.Value;
-        expense.Histories.Add(CreateHistory(expense, ownerId, "Updated", ExpenseStatus.Draft, SerializeChanges(request, changes)));
+        DateTime timestampUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        Expense? updatedExpense = await _repository.UpdateOwnedDraftAsync(id, ownerId, request, changes, timestampUtc, cancellationToken);
 
-        await _repository.BeginAsync(cancellationToken);
-        try
+        if (updatedExpense is null)
         {
-            await _repository.SaveAsync(cancellationToken);
-            await _repository.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _repository.RollbackAsync(cancellationToken);
-            throw;
+            return DraftServiceResult<ExpenseDraftResponse>.Failure("Conflict", "Only Draft expenses can be edited.");
         }
 
-        return DraftServiceResult<ExpenseDraftResponse>.Success(ToResponse(expense, categoryResult.Value!));
+        return DraftServiceResult<ExpenseDraftResponse>.Success(ToResponse(updatedExpense, categoryResult.Value!));
     }
 
     private static DraftServiceResult<string> AuthorizeEmployee(ClaimsPrincipal user, string message)

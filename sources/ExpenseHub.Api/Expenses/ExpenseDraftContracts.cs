@@ -12,6 +12,7 @@ internal sealed class ExpenseDraftRequest
     public string Description { get; set; } = string.Empty;
 
     [Range(0.01, 2147483647d)]
+    [DecimalPrecision(2)]
     public decimal Amount { get; set; }
 
     [Required]
@@ -19,6 +20,27 @@ internal sealed class ExpenseDraftRequest
 
     [Range(1, int.MaxValue)]
     public int CategoryId { get; set; }
+}
+
+[AttributeUsage(AttributeTargets.Property)]
+internal sealed class DecimalPrecisionAttribute : ValidationAttribute
+{
+    private readonly int _scale;
+
+    public DecimalPrecisionAttribute(int scale)
+    {
+        _scale = scale;
+    }
+
+    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+    {
+        if (value is decimal d && decimal.Round(d, _scale) != d)
+        {
+            return new ValidationResult($"The amount must have at most {_scale} decimal places.");
+        }
+
+        return ValidationResult.Success;
+    }
 }
 
 internal sealed record ExpenseDraftResponse(int Id, string OwnerId, string Description, decimal Amount, DateTime ExpenseDate, int CategoryId, string CategoryName, ExpenseStatus Status);

@@ -74,6 +74,39 @@ internal sealed class EfExpenseDraftRepository : IExpenseDraftRepository, IExpen
         .Include(expense => expense.Category)
         .SingleOrDefaultAsync(expense => expense.Id == id, cancellationToken);
 
+    public async Task<Expense?> UpdateOwnedDraftAsync(int id, string ownerId, ExpenseDraftRequest request, List<DraftChange> changes, DateTime timestampUtc, CancellationToken cancellationToken)
+    {
+        await using IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        int updated = await _dbContext.Expenses
+            .Where(expense => expense.Id == id && expense.OwnerId == ownerId && expense.Status == ExpenseStatus.Draft)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(expense => expense.Description, request.Description)
+                .SetProperty(expense => expense.Amount, request.Amount)
+                .SetProperty(expense => expense.ExpenseDate, request.ExpenseDate!.Value.Date)
+                .SetProperty(expense => expense.CategoryId, request.CategoryId), cancellationToken);
+
+        if (updated == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        _dbContext.ExpenseHistories.Add(new ExpenseHistory
+        {
+            ExpenseId = id,
+            ActorId = ownerId,
+            Action = "Updated",
+            TimestampUtc = timestampUtc,
+            PreviousStatus = ExpenseStatus.Draft,
+            NewStatus = ExpenseStatus.Draft,
+            DraftChanges = string.Join(", ", changes.ConvertAll(change => $"{change.Field}: {change.PreviousValue} -> {change.NewValue}"))
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        Expense? expense = await _dbContext.Expenses.AsNoTracking().Include(item => item.Category).SingleAsync(item => item.Id == id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return expense;
+    }
+
     public async Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestampUtc, CancellationToken cancellationToken)
     {
         await using IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);

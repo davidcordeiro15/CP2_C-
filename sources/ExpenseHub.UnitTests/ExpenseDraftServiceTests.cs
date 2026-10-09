@@ -77,6 +77,7 @@ public sealed class ExpenseDraftServiceTests
     [DataRow("2147483647", true)]
     [DataRow("0.00", false)]
     [DataRow("2147483648", false)]
+    [DataRow("10.555", false)]
     public void AmountValidationHonorsLimits(string amount, bool expected)
     {
         ExpenseDraftRequest request = ValidRequest();
@@ -213,6 +214,27 @@ public sealed class ExpenseDraftServiceTests
     }
 
     /// <summary>
+    /// Bloqueia e não registra histórico quando o reembolso é enviado entre a leitura e a atualização.
+    /// </summary>
+    [TestMethod]
+    public async Task UpdateReturnsConflictWithoutHistoryWhenExpenseIsSubmittedConcurrently()
+    {
+        InMemoryExpenseDraftRepository repository = CreateRepository();
+        ExpenseDraftService service = CreateService(repository);
+        Expense expense = repository.AddExpense("owner-1", ExpenseStatus.Draft);
+        repository.SubmitBeforeUpdate = true;
+        ExpenseDraftRequest request = ValidRequest();
+        request.Description = "Updated description";
+
+        DraftServiceResult<ExpenseDraftResponse> result = await service.UpdateAsync(expense.Id, request, Principal("owner-1", ExpenseHubRoles.Employee), CancellationToken.None);
+
+        Assert.AreEqual("Conflict", result.ErrorCode);
+        Assert.AreEqual(ExpenseStatus.Submitted, expense.Status);
+        Assert.AreEqual("Valid draft description", expense.Description);
+        Assert.IsEmpty(expense.Histories);
+    }
+
+    /// <summary>
     /// Não cria histórico quando edição não altera dados.
     /// </summary>
     [TestMethod]
@@ -297,6 +319,7 @@ internal sealed class InMemoryExpenseDraftRepository : IExpenseDraftRepository
     public List<Expense> Expenses { get; } = [];
     public List<ExpenseCategory> Categories { get; } = [];
     public int SaveCount { get; private set; }
+    public bool SubmitBeforeUpdate { get; set; }
 
     public Expense AddExpense(string ownerId, ExpenseStatus status)
     {
@@ -335,6 +358,42 @@ internal sealed class InMemoryExpenseDraftRepository : IExpenseDraftRepository
         }
 
         return Task.FromResult(expense);
+    }
+
+    public Task<Expense?> UpdateOwnedDraftAsync(int id, string ownerId, ExpenseDraftRequest request, List<DraftChange> changes, DateTime timestampUtc, CancellationToken cancellationToken)
+    {
+        if (SubmitBeforeUpdate)
+        {
+            Expense? submittedExpense = Expenses.SingleOrDefault(item => item.Id == id && item.OwnerId == ownerId);
+            if (submittedExpense is not null)
+            {
+                submittedExpense.Status = ExpenseStatus.Submitted;
+            }
+        }
+
+        Expense? expense = Expenses.SingleOrDefault(item => item.Id == id && item.OwnerId == ownerId && item.Status == ExpenseStatus.Draft);
+        if (expense is null)
+        {
+            return Task.FromResult<Expense?>(null);
+        }
+
+        expense.Description = request.Description;
+        expense.Amount = request.Amount;
+        expense.ExpenseDate = request.ExpenseDate!.Value.Date;
+        expense.CategoryId = request.CategoryId;
+        expense.Category = Categories.Single(category => category.Id == request.CategoryId);
+        expense.Histories.Add(new ExpenseHistory
+        {
+            ExpenseId = id,
+            ActorId = ownerId,
+            Action = "Updated",
+            TimestampUtc = timestampUtc,
+            PreviousStatus = ExpenseStatus.Draft,
+            NewStatus = ExpenseStatus.Draft,
+            DraftChanges = string.Join(", ", changes.ConvertAll(change => $"{change.Field}: {change.PreviousValue} -> {change.NewValue}"))
+        });
+        SaveCount++;
+        return Task.FromResult<Expense?>(expense);
     }
 
     public Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken)

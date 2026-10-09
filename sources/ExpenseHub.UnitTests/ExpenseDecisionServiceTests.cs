@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -45,6 +46,24 @@ public sealed class ExpenseDecisionServiceTests
         Assert.IsTrue(result.Succeeded);
         Assert.AreEqual(ExpenseStatus.Rejected, result.Value!.Status);
         Assert.AreEqual("Justification is valid", repository.Expenses[0].Histories.Single().RejectionReason);
+    }
+
+    /// <summary>Valida que justificativa nula não provoca exceção antes da validação do DTO.</summary>
+    [TestMethod]
+    public void RejectRequestWithNullJustificationReturnsValidationError()
+    {
+        List<string> errors = ExpenseHub.Api.Program.ValidateRejectRequest(new ExpenseRejectRequest { Justification = null! });
+
+        Assert.IsNotEmpty(errors);
+    }
+
+    /// <summary>Valida que corpo ausente produz erro de validação.</summary>
+    [TestMethod]
+    public void RejectRequestWithoutBodyReturnsValidationError()
+    {
+        List<string> errors = ExpenseHub.Api.Program.ValidateRejectRequest(null);
+
+        Assert.IsNotEmpty(errors);
     }
 
     /// <summary>Valida comportamento esperado.</summary>

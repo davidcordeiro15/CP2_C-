@@ -21,7 +21,7 @@ internal interface IAdminUserService
 
 internal sealed class AdminUserService : IAdminUserService
 {
-    private static readonly HashSet<string> _allowedRoles = new(ExpenseHubRoles.All, StringComparer.Ordinal);
+    private static readonly HashSet<string> _allowedRoles = new(ExpenseHubRoles.All, StringComparer.OrdinalIgnoreCase);
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ExpenseHubDbContext? _dbContext;
 
@@ -65,8 +65,8 @@ internal sealed class AdminUserService : IAdminUserService
         IList<string> currentRoles = await _userManager.GetRolesAsync(targetUser);
 
         bool removesOwnAdminRole = IsCurrentUser(currentUser, targetUser) &&
-            currentRoles.Contains(ExpenseHubRoles.Admin, StringComparer.Ordinal) &&
-            !requestedRoles.Contains(ExpenseHubRoles.Admin, StringComparer.Ordinal);
+            currentRoles.Contains(ExpenseHubRoles.Admin, StringComparer.OrdinalIgnoreCase) &&
+            !requestedRoles.Contains(ExpenseHubRoles.Admin, StringComparer.OrdinalIgnoreCase);
 
         if (removesOwnAdminRole)
         {
@@ -184,15 +184,19 @@ internal sealed class AdminUserService : IAdminUserService
             return new ServiceError("InvalidRole", "Roles cannot be empty.");
         }
 
-        string[] distinctRoles = request.Roles.Distinct(StringComparer.Ordinal).ToArray();
-        string[] unknownRoles = distinctRoles.Where(role => !_allowedRoles.Contains(role)).ToArray();
+        string[] unknownRoles = request.Roles
+            .Where(role => !_allowedRoles.Contains(role))
+            .ToArray();
 
         if (unknownRoles.Length > 0)
         {
             return new ServiceError("UnknownRole", "Only known ExpenseHub roles are allowed.");
         }
 
-        roles = distinctRoles;
+        roles = request.Roles
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(role => ExpenseHubRoles.All.First(knownRole => string.Equals(knownRole, role, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
         return null;
     }
 

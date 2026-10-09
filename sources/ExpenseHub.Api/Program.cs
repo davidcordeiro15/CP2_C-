@@ -45,7 +45,9 @@ internal static class Program
         builder.Services.AddOptions<SeedAdminOptions>()
             .Bind(builder.Configuration.GetSection(SeedAdminOptions.SectionName));
         builder.Services.AddSingleton(TimeProvider.System);
-        builder.Services.AddDbContext<ExpenseHubDbContext>(options => options.UseOracle(oracleConnectionString));
+        builder.Services.AddDbContext<ExpenseHubDbContext>(options => options.UseOracle(
+            oracleConnectionString,
+            oracleOptions => oracleOptions.UseOracleSQLCompatibility(OracleSQLCompatibility.DatabaseVersion19)));
         builder.Services.AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole>()
             .AddEntityFrameworkStores<ExpenseHubDbContext>();
@@ -411,14 +413,18 @@ internal static class Program
             : [.. results.Select(result => result.ErrorMessage ?? "Invalid value.")];
     }
 
-    private static List<string> ValidateRejectRequest(ExpenseRejectRequest? request)
+    internal static List<string> ValidateRejectRequest(ExpenseRejectRequest? request)
     {
         if (request is null)
         {
             return ["A request body is required."];
         }
 
-        request.Justification = request.Justification.Trim();
+        if (request.Justification is not null)
+        {
+            request.Justification = request.Justification.Trim();
+        }
+
         List<ValidationResult> results = [];
         bool isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
         return isValid
