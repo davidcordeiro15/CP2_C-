@@ -25,15 +25,18 @@ namespace ExpenseHub.UnitTests;
 public sealed class IdentityAuthenticationTests
 {
     private static string CreateSyntheticPassword() => $"Synthetic-{Guid.NewGuid():N}-Aa1!";
-    private static string CreateSigningKey() => Convert.ToBase64String(Guid.NewGuid().ToByteArray()) + Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+    private static string GenerateTestKey() => string.Concat(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"));
 
-    private static readonly JwtOptions _jwtOptions = new()
+    private static JwtOptions CreateJwtOptions()
     {
-        Issuer = "ExpenseHub.Tests",
-        Audience = "ExpenseHub.Tests.Client",
-        SigningKey = CreateSigningKey(),
-        ExpirationMinutes = 10
-    };
+        return new JwtOptions
+        {
+            Issuer = "ExpenseHub.Tests",
+            Audience = "ExpenseHub.Tests.Client",
+            SigningKey = GenerateTestKey(),
+            ExpirationMinutes = 10
+        };
+    }
 
     /// <summary>
     /// Valida que credenciais inválidas não emitem token.
@@ -71,7 +74,8 @@ public sealed class IdentityAuthenticationTests
         Assert.IsTrue((await userManager.CreateAsync(user, credential)).Succeeded);
         Assert.IsTrue((await userManager.AddToRoleAsync(user, ExpenseHubRoles.Employee)).Succeeded);
         Assert.IsTrue((await userManager.AddToRoleAsync(user, ExpenseHubRoles.Approver)).Succeeded);
-        LoginService service = new(userManager, CreateTokenService());
+        JwtOptions options = CreateJwtOptions();
+        LoginService service = new(userManager, CreateTokenService(options));
 
         LoginResponse? response = await service.AuthenticateAsync(
             new LoginRequest { Email = "user@example.com", Password = credential },
@@ -92,7 +96,7 @@ public sealed class IdentityAuthenticationTests
                 $"Expected role '{expected}' not found in actual roles {string.Join(", ", roleValues)}");
         }
 
-        ValidateToken(response.AccessToken, token.ValidTo);
+        ValidateToken(response.AccessToken, token.ValidTo, options);
     }
 
     /// <summary>
@@ -107,36 +111,39 @@ public sealed class IdentityAuthenticationTests
     [TestMethod]
     public void TokenUsesConfiguredSignatureIssuerAudienceAndExpiration()
     {
-        JwtTokenService service = CreateTokenService();
+        JwtOptions options = CreateJwtOptions();
+        JwtTokenService service = CreateTokenService(options);
         ApplicationUser user = new() { Id = "stable-user-id", Email = "user@example.com" };
 
         LoginResponse response = service.CreateToken(user, [ExpenseHubRoles.Employee]);
         JwtSecurityToken token = new JwtSecurityTokenHandler().ReadJwtToken(response.AccessToken);
 
-        Assert.AreEqual(_jwtOptions.Issuer, token.Issuer);
-        CollectionAssert.Contains(token.Audiences.ToArray(), _jwtOptions.Audience);
+        Assert.AreEqual(options.Issuer, token.Issuer);
+        CollectionAssert.Contains(token.Audiences.ToArray(), options.Audience);
         Assert.AreEqual(600, response.ExpiresIn);
         Assert.IsTrue(token.ValidTo > token.ValidFrom);
-        ValidateToken(response.AccessToken, token.ValidTo);
+        ValidateToken(response.AccessToken, token.ValidTo, options);
     }
 
-    private static JwtTokenService CreateTokenService()
+    private static JwtTokenService CreateTokenService() => CreateTokenService(CreateJwtOptions());
+
+    private static JwtTokenService CreateTokenService(JwtOptions options)
     {
         return new JwtTokenService(
-            Options.Create(_jwtOptions),
+            Options.Create(options),
             new FixedTimeProvider(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero)));
     }
 
-    private static void ValidateToken(string encodedToken, DateTime validTo)
+    private static void ValidateToken(string encodedToken, DateTime validTo, JwtOptions options)
     {
         TokenValidationParameters parameters = new()
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(_jwtOptions.SigningKey)),
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(options.SigningKey)),
             ValidateIssuer = true,
-            ValidIssuer = _jwtOptions.Issuer,
+            ValidIssuer = options.Issuer,
             ValidateAudience = true,
-            ValidAudience = _jwtOptions.Audience,
+            ValidAudience = options.Audience,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(11),
             LifetimeValidator = (_, expires, _, _) => expires == validTo

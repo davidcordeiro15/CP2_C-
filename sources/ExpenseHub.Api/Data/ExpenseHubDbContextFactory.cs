@@ -25,7 +25,11 @@ internal sealed class ExpenseHubDbContextFactory : IDesignTimeDbContextFactory<E
         DbContextOptionsBuilder<ExpenseHubDbContext> optionsBuilder = new();
         optionsBuilder.UseOracle(
             oracleConnectionString,
-            oracleOptions => oracleOptions.MigrationsAssembly(typeof(ExpenseHubDbContext).Assembly.FullName));
+            oracleOptions =>
+            {
+                oracleOptions.MigrationsAssembly(typeof(ExpenseHubDbContext).Assembly.FullName);
+                oracleOptions.UseOracleSQLCompatibility(OracleSQLCompatibility.DatabaseVersion19);
+            });
         return new ExpenseHubDbContext(optionsBuilder.Options);
     }
 }

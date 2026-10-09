@@ -146,6 +146,22 @@ internal sealed class InMemoryQueryRepository : IExpenseDraftRepository, IExpens
 
         return Task.FromResult<Expense?>(expense);
     }
+
+    public Task<Expense?> UpdateOwnedDraftAsync(int id, string ownerId, ExpenseDraftRequest request, List<DraftChange> changes, DateTime timestampUtc, CancellationToken cancellationToken)
+    {
+        Expense? expense = Expenses.SingleOrDefault(item => item.Id == id && item.OwnerId == ownerId && item.Status == ExpenseStatus.Draft);
+        if (expense is null)
+        {
+            return Task.FromResult<Expense?>(null);
+        }
+
+        expense.Description = request.Description;
+        expense.Amount = request.Amount;
+        expense.ExpenseDate = request.ExpenseDate!.Value.Date;
+        expense.CategoryId = request.CategoryId;
+        return Task.FromResult<Expense?>(expense);
+    }
+
     public Task<Expense?> FindByIdReadOnlyAsync(int id, CancellationToken cancellationToken) => Task.FromResult(Expenses.SingleOrDefault(item => item.Id == id));
     public Task<Expense?> DecideAsync(int id, string actorId, ExpenseStatus targetStatus, string? justification, DateTime timestamp, CancellationToken cancellationToken)
     {
